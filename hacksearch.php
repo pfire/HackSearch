@@ -40,6 +40,428 @@ $options = getopt($shortopts, $longopts);
 //Clean the above mess.
 unset($shortopts, $longopts);
 
+/* Scanner Class */
+class FileScanner {
+
+   private $total_rules = 7;
+   private $total_global_rules = 6;
+   private $contents = "";
+   private $reg = array();
+   public $score = 0;
+   private $f;
+
+   public $explain = array(); 
+
+   public function scan($f)
+   {
+      /* We do not really want to scan all type of files. The following are excluded:
+       * PDF Files
+       * Doc, Docx Files
+       * Avi, MDF, MOV, MPG and MPEG movie type of files
+       * PSD Photoshop files
+       * Zip, Tar, gz, 7zip, Rar archive files
+       */
+      $excludes = array('pdf','doc','docx','avi','mdf','mov','mpg','mpeg','psd','zip','tar','gz','7zip','rar');
+      if(in_array($f->getExtension(),$excludes))
+      {
+      	return false;
+      }
+      
+      $this->f = $f;
+      $contents = file($f->getRealPath(), FILE_IGNORE_NEW_LINES  |FILE_SKIP_EMPTY_LINES);
+      foreach($contents as $line){
+         for($i=1;$i <= $this->total_rules; $i++){
+         	if($this->score > 99){
+             	return true;
+        	}
+            $rule_name = "rule_".$i;
+            $this->$rule_name($line);
+            $this->contents .= $line;
+         }
+      }
+        
+        //Return at this point if line based checks found too suspicious code
+        if($this->score > 99){
+             return true;
+        } 
+
+      //Run global function scans
+      for($i=1;$i <= $this->total_global_rules;$i++){
+         $global_rule_name = "global_rule_".$i;
+         $this->$global_rule_name();
+         if($this->score > 99){
+             	return true;
+        }
+      }
+
+      if($this->score > 99){
+         return true;
+      }
+      //.htaccess thing
+      $this->check_htaccess();
+
+   }
+
+    private function check_htaccess()
+    {
+    	if($this->f->getFilename() == ".htaccess"){
+    	    if(stripos($this->contents,'google') !== FALSE AND stripos($this->contents,'HTTP_REFERER') !== FALSE){
+        		$this->score += 100;
+        		$this->explain[] = "[htaccess_referer]";
+    	    }
+    	}
+    }
+
+   private function global_rule_1()
+   {
+      // Search for google_analist pattern. Used by
+      // google-something-hackers.html
+      if(stripos($this->contents,"google_analist") !== FALSE){
+         //Critical
+         $this->score += 100;
+         $this->explain[] = "[google_analist]";
+      }
+      if(stripos($this->contents,"PhpReverseProxy") !== FALSE){
+      	 $this->score += 100;
+      	 $this->explain[] = "[php_reverse_proxy]";
+      	 return;
+      }
+      if(stripos($this->contents,"ok creat file") !== FALSE AND stripos($this->contents,"ok del file"))
+      {
+      	$this->score += 100;
+      	$this->explain[] = "[php_backdoor]";
+      	return;
+      }
+     if(stripos($this->contents,"tool4spam.com") !== FALSE){
+	     $this->score += 100;
+         $this->explain[] = "[google_analist]";
+      }
+      if(stripos($this->contents,"tmp_god") !== FALSE AND stripos($this->contents,"GodSpy") !== FALSE
+        AND stripos($this->contents,"makehide") !== FALSE
+      ) {
+        $this->score += 100;
+        $this->explain[] = "[shell_script]";
+      }
+
+	if(stripos($this->contents, "Mass Mailer") !== FALSE)
+	{
+		$this->score +=100;
+		$this->explain[] = "[mass_mailer]";
+	}
+   }
+
+
+   private function global_rule_2()
+   {
+   	//Revslider file check.
+	if($this->f->getFilename() == "wp-class-headers.php" OR $this->f->getFilename() == "class-wp-index.php"){
+		//This file is used by Revslider hackers.
+		$this->score += 100;
+		$this->explain[] = "[revslider_files]";
+	}
+
+	if($this->f->getFilename() == "wp-options.php" OR $this->f->getFilename() == "ms-head.php"){
+		if(stripos($this->contents,"move_uploaded_file") !== FALSE){
+			$this->score += 100;
+	                $this->explain[] = "[revslider_upload]";
+		}
+	}
+		
+	 if(stripos($this->contents,"/etc/passwd") !== FALSE){
+         //Bad
+         $this->score += 100;
+         $this->explain[] = "[etc_passwd_keyword]";
+      }
+   }
+
+   private function global_rule_3()
+   {
+    	if(stripos($this->contents,'preg_replace("/.*/e"') !== FALSE OR stripos($this->contents,'preg_replace("/.+/e"') !== FALSE){
+    	   // Very bad.
+    	   $this->score += 100;
+    	   $this->explain[] = "[pregmatch_evaluate]";
+    	}
+    }
+
+    private function global_rule_4()
+    {
+    	if(stripos($this->contents,'hacked by') !== FALSE){
+    	    //Pretty much bad.. :)
+    	    $this->score += 100;
+    	    $this->explain[] = "[hacked_by_str]";
+    	}
+    }
+
+    private function global_rule_5()
+    {
+            if(stripos($this->contents,'PHP_OS') !== FALSE AND !array_key_exists('php_os',$this->reg)){
+                if(!in_array(md5_file($this->f->getRealPath()),
+                array('c3d902f1007e54d1f95b268e4f9643d6','a392bff2e5d22b555bf1e5c098a3eda3','d1c8a277f0cc128b5610db721c70eabd')
+        	    )){ 
+            	    $this->score += 15;
+            	    $this->explain[] = "[PHP_OS]";
+            	    $this->reg['php_os'] = TRUE;
+        	    }
+        	}
+        	if(stripos($this->contents,'extension_loaded') !== FALSE AND !array_key_exists('extension_loaded',$this->reg)){
+        	    if(!in_array($this->f->getFilename(), array('php-brief.php','mootools-more.js','php.php','tokenizephp.js','simplepie.php'))){
+            	    $this->score += 15;
+            	    $this->explain[] = "[extension_loaded_keyword]";
+            	    $this->reg['extension_loaded'] = TRUE;
+        	    }
+        	}
+        	if(stripos($this->contents,'socket_create') !== FALSE AND !array_key_exists('socket_create',$this->reg)){
+                    if(!in_array(md5_file($this->f->getRealPath()),
+                    array('c3d902f1007e54d1f95b268e4f9643d6','a392bff2e5d22b555bf1e5c098a3eda3')
+                    )){ 
+                        $this->score += 15;
+                        $this->explain[] = "[socket_create_keyword]";
+            	        $this->reg['socket_create'] = TRUE;
+                    }
+                }
+        	if(stripos($this->contents,'move_uploaded_file') !== FALSE AND !array_key_exists('move_upload',$this->reg)){
+            	     if(!in_array($this->f->getFilename(), array('php-brief.php','mootools-more.js','php.php','tokenizephp.js'))){     
+                        $this->score += 20;
+                        $this->explain[] = "[upload_script]";
+            	        $this->reg['move_upload'] = TRUE;
+            	   }
+            }
+
+    	if(stripos($this->contents,'vpsp_version') !== FALSE){
+    	    $this->score +=100;
+    	    $this->explain[] = "[vpsp_proxy]";
+    	}
+    	
+    	if(stripos($this->contents,'J3F1N') !== FALSE){
+    	    $this->score +=100;
+    	    $this->explain[] = "[j3f1n_mailer]";
+    	}
+
+	if(stripos($this->contents,'PHP Bulk Emailer') !== FALSE){
+	    $this->score +=100;
+	    $this->explain[] = "[bulk_emailer]";
+	}
+    
+    	if(stripos($this->contents,'shmop.so') !== FALSE OR stripos($this->contents,'php_shmop.dll') !== FALSE){
+    	    $this->score +=100;
+    	    $this->explain[] = "[shmop_ext]";
+    	}
+    	if(stripos($this->contents,'edoced_46esab') !== FALSE){
+    	    $this->score +=100;
+    	    $this->explain[] = "[strrev_base64]";
+    	}
+
+	if(stripos($this->contents,'WSO_VERSION') !== FALSE){
+	    $this->score +=100;
+	    $this->explain[] = "[Shell_script]";
+	}
+    
+    	if(stripos($this->contents, '"fro"+"mC"+"harC"+"o"+"de"') !== FALSE){
+    	    $this->score +=100;
+    	    $this->explain[] = "[Obfus_fromcharcode]";
+    	}
+
+	if(stripos($this->contents, 'PostMan Full') !== FALSE){
+		$this->score +=100;
+		$this->explain[] = "[Postman_mlr]";
+	}
+	if(stripos($this->contents, 'php_display') !== FALSE AND stripos($this->contents, 'error_404') !== FALSE AND stripos($this->contents, '@file_get_contents') !== FALSE){
+		$this->score +=100;
+		$this->explain[] = "[Remote_fetch]";
+	}
+	
+	if(stripos($this->contents, "pagecr.html") !== FALSE){
+		$this->score +=100;
+		$this->explain[] = "[html_generator]";
+	}
+
+    }
+    
+    private function global_rule_6()
+    {
+    	if($this->f->getExtension() == "php"){
+    		if(stripos($this->contents, "return base64_decode") !== FALSE 
+    			AND stripos($this->contents, "eval(") !== FALSE
+    			AND stripos($this->contents, "strlen(") !== FALSE
+    			AND stripos($this->contents, "Array(") !== FALSE
+    		) {
+    			$this->score += 100;
+    			$this->explain[] = "[mass_mailer]";
+    		}
+    		
+    		if(stripos($this->contents, "\$numemails = count(\$allemails);") !== FALSE)
+    		{
+    			$this->score += 100;
+    			$this->explain[] = "[mass_mailer]";
+    		}
+    	}
+    }
+
+
+   private function rule_1($l){
+      // We do not really want to check JS scripts where eval is rather common
+      if($this->f->getExtension() == "js")
+      {
+      	return false;
+      }
+      // eval(anything here)ase64_decode regex search
+      if(preg_match('/\beval\b\s*(.*)\(\s*base64_decode/i',$l))
+      {
+         //This is pretty obvious. Both eval and base64 are present one after
+         //another.
+         $this->score += 100;
+         $this->explain[] = "[eval_base64]";
+      } 
+ 
+   }
+   
+   private function rule_2($l){
+   		if($this->f->getExtension() == "php")
+   		{
+   			if(stripos($l,"array_diff_ukey") !== FALSE AND stripos($l,"request") !== FALSE)
+   			{
+   				$this->score += 100;
+   				$this->explain[] = "[array_dif|request]";
+   				return true;
+   			}
+   			
+   			if(stripos($l,"mail(") !== FALSE AND stripos($l,'$_POST') !== FALSE AND stripos($l,'stripslashes') !== FALSE)
+   			{
+   				$this->score += 100;
+   				$this->explain[] = "[mail|post]";
+   				return true;
+   			}
+   		}
+   }
+
+   private function rule_7($l){
+      
+      // We do not really want to check JS scripts where eval is rather common
+      if($this->f->getExtension() == "js")
+      {
+      	return false;
+      }
+      // Search for eval($_POST or eval($_GET) or request/cookie/etc
+      if(preg_match('/\b(eval|system)\b\s*(.*)\(\s*(\$_GET|\$_POST|\$_REQUEST|\$_COOKIE|\$_SERVER)|killall|crontab/i',$l)){
+         //This is critical.
+         $this->score += 100;
+         $this->explain[] = "[eval|sys_globals]";
+      }
+   }
+
+   private function rule_3($l){
+	//Search for eval and check if certain conditions are met.
+	//skip if file is not a .php file
+    if($this->f->getExtension() == "php"){ 
+    	if(stripos($l, 'eval') !== FALSE){
+    	    //Shell script with obfuscated entries.
+    	    if(stripos($l,'$__') !== FALSE){
+        		$this->score += 100;
+        		$this->explain[] = "[eval_obfusc]";
+    	    }
+    	}
+    }
+   }
+
+   private function rule_4($l){
+      // Search for script document.write followed by an iframe
+      if(in_array($this->f->getFilename(), array('tinymce.min.js','easyXDM.debug.js','tinymce.js','tiny_mce.js','codemirror.js','mootools.js','customize-controls.min.js')))
+	return;
+      if($this->f->getExtension() == "php") 
+	{
+      if(preg_match('/script\s*(.*)document\.write\s*(.*)iframe/i',$l)){
+         //Pretty much critical as well.
+         $this->score += 100;
+         $this->explain[] = "[scr+doc.write+ifrm]";
+      }
+	}
+   }
+   
+   private function rule_6($l){
+        if(stripos($l,'visibility') !== FALSE AND stripos($l,'echo') !== FALSE AND stripos($l,'iframe') !== FALSE)
+        {
+            //Contains echo, iframe and visibility keywords in a single line.
+            $this->score +=100;
+            $this->explain[] = "[iframe+visib]";
+        }
+        if(stripos($l, "strtoupper(") !== FALSE AND stripos($l, "eval(") !== FALSE)
+        {
+                $this->score +=100;
+                $this->explain[] = "[strtoupper_eval]";
+        }
+   }
+
+   private function rule_5($l){
+   	
+   		if(stripos($l,"stream_context_create") !== FALSE AND stripos($l,"stream_socket_client") !== FALSE AND stripos($l,"base64_decode") !== FALSE)
+   		{
+   			$this->score +=100;
+   			$this->explain[] = "[socket+base64]";
+   			return;
+   		}
+   		
+   		if(stripos($l, "porn") !== FALSE AND stripos($l, "sex") !== FALSE)
+   		{
+   			$this->score += 100;
+   			$this->explain[] = "[porn_sex_keys]";
+   			return;
+   		}
+
+    	//Very clever tmp/analog spam inclusion code.
+    	if(stripos($l,"@require_once") !== FALSE AND stripos($l,"tmp/analog") !== FALSE){
+    	    $this->score +=100;
+    	    $this->explain[] = "[joomla_tmp/analog]";
+    	}
+    
+    	if(!isset($this->reg['long_line']) AND strlen($l) > 500){
+            //Not really critical but suspicious.
+        	if(stripos($l,'eval(') !== FALSE AND $this->f->getExtension() != "js" AND $this->f->getExtension() != "ini"){
+        	    //This is rather general. We need to exclude some well know files which are NOT malicious.
+            		if($this->f->getExtension() != "meta" AND $this->f->getExtension() != "js" AND $this->f->getExtension() != "json"){
+					$this->score +=50;
+            		$this->explain[] = "[eval+long_line]";
+        	    }
+        	}
+
+        	if(stripos($l,'urldecode') !== FALSE){
+        	    $this->score +=25;
+        	}
+            
+            //Long lines are normal for .js, .meta and .json files. We do not penalize them. 
+            if($this->f->getExtension() == "php"){
+			//Additional checks for keywords in such a long line
+                if(stripos($l,'ini_set') !== FALSE){
+            	    $this->score +=15;
+            	    $this->explain[] = "[+ini_set]";
+            	}
+            	if(stripos($l,'md5') !== FALSE){
+            	    $this->score +=15;
+            	    $this->explain[] = "[+md5]";
+            	}
+				if(stripos($l,'$globals')){
+				    $this->score += 50;
+				    $this->explain[] = "[+globals]";
+				}
+            
+            	if(stripos($l,'mail') !== FALSE){
+            	    $this->score +=25;
+            	    $this->explain[] = "[+mail]";
+            	}
+				if(stripos($l,'preg_replace') !== FALSE){
+					$this->score+=50;
+					$this->explain[] = "[preg_repl_long]";
+				}
+                 $this->score += 50;
+                 if(empty($this->explain)){
+                 	$this->explain[] = "[too_long_line]";
+                 }
+                 $this->reg['long_line'] = TRUE;
+	    }
+      }
+   }
+}
+
+
 /* Config Class */
 
 class HackSearch_Config 
@@ -605,7 +1027,6 @@ function fetch_rules($source_url, $isMD5 = FALSE)
         $output->e("\n[*]",0,'green');
         $output->e(' Updating malware definitions',1,'white');
     }
-    fetch_rules($config->update_server);
     $scanner = new FileScanner();
     
     /* Download MD5 Hashes */
