@@ -414,11 +414,6 @@ class FileScanner {
     	}
     
     	if(!isset($this->reg['long_line']) AND strlen($l) > 700){
-    	    $this->score += 50;
-    	    $this->explain[] = "[long_line]";
-    	}
-    	
-    	if(strlen($l) > 700){
             //Not really critical but suspicious.
         	if(stripos($l,'eval(') !== FALSE AND $this->f->getExtension() != "js" AND $this->f->getExtension() != "ini"){
         	    //This is rather general. We need to exclude some well know files which are NOT malicious.
@@ -456,20 +451,16 @@ class FileScanner {
 					$this->score+=50;
 					$this->explain[] = "[preg_repl_long]";
 				}
-				
-				if(substr_count($l," ") < 5){
-				    $this->score+=50;
-				    $this->explain[] = "[no_spaces]";
-				}
-				
-                 
+                 $this->score += 50;
+                 if(empty($this->explain)){
+                 	$this->explain[] = "[too_long_line]";
+                }
                 //TODO: Add a space char count check.
                  $this->reg['long_line'] = TRUE;
 	    }
       }
-      
-   } //End of method.
-}//End of class.
+   }
+}
 
 
 /* Config Class */
