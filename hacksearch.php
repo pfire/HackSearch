@@ -142,8 +142,8 @@ class FileScanner {
         $this->score += 100;
         $this->explain[] = "[shell_script]";
       }
-
-	if(stripos($this->contents, "Mass Mailer") !== FALSE)
+    // The second if is required because of a Joomla's com_users wording.
+	if(stripos($this->contents, "Mass Mailer") !== FALSE AND stripos($this->contents,"Redirect to admin index if mass mailer") === FALSE)
 	{
 		$this->score +=100;
 		$this->explain[] = "[mass_mailer]";
