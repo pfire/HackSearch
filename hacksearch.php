@@ -10,12 +10,12 @@
  * @author     Valeri Markov <val@phpfire.net>
  * @copyright  2012-2014 Valeri Markov
  * @license    LGPLv3
- * @version    2.2.0
+ * @version    2.2.1
  * @link       http://www.phpfire.net/hacksearch.phar
  * @since      File available since Release 2.0.0
  */
  
-define("HS_VERSION","2.2.0");
+define("HS_VERSION","2.2.1");
 
 /* Setup some php variables */
 set_time_limit(0);
@@ -399,7 +399,7 @@ class FileScanner {
    			$this->explain[] = "[socket+base64]";
    			return;
    		}
-   		
+   		//TODO: change this to regex to check whole words only.
    		if(stripos($l, "porn") !== FALSE AND stripos($l, "sex") !== FALSE)
    		{
    			$this->score += 100;
@@ -413,7 +413,7 @@ class FileScanner {
     	    $this->explain[] = "[joomla_tmp/analog]";
     	}
     
-    	if(!isset($this->reg['long_line']) AND strlen($l) > 500){
+    	if(!isset($this->reg['long_line']) AND strlen($l) > 700){
             //Not really critical but suspicious.
         	if(stripos($l,'eval(') !== FALSE AND $this->f->getExtension() != "js" AND $this->f->getExtension() != "ini"){
         	    //This is rather general. We need to exclude some well know files which are NOT malicious.
@@ -454,7 +454,8 @@ class FileScanner {
                  $this->score += 50;
                  if(empty($this->explain)){
                  	$this->explain[] = "[too_long_line]";
-                 }
+                }
+                //TODO: Add a space char count check.
                  $this->reg['long_line'] = TRUE;
 	    }
       }
@@ -479,7 +480,7 @@ class HackSearch_Config
     public $update_server = "http://phpfire.net/hacksearch/definitions.php";
     public $md5_server = "http://phpfire.net/hacksearch/md5s/index.html";
     public $excludes_server = "http://phpfire.net/hacksearch/falsepositive/index.html";
-	public $hs_version = "2.2.0";
+	public $hs_version = "2.2.1";
     
     public function __construct()
     {
@@ -641,7 +642,7 @@ class HackSearch_Output
         if(!$this->cfg->quiet)
         {
             $this->e('##############################################',1,'cyan');
-            $this->e('## PHP Hack Search v2.2.0                   ##',1,'cyan');
+            $this->e('## PHP Hack Search v2.2.1                   ##',1,'cyan');
             $this->e('## Author: Valeri Markov                    ##',1,'cyan');
             $this->e('## URL: http://www.phpfire.net/             ##',1,'cyan');
             $this->e('## License: LGPL v3, see --license          ##',1,'cyan');
@@ -705,12 +706,21 @@ class HackSearch_Output
                 } else {
             	    $explain = $data['explain'];
                 }
-                $this->e("[".$data['score']."]\t",0,"cyan");
-                $this->e(($this->cfg->show_details ? $explain : ""),0);
-                if(strlen($explain) > 15){
-                    $this->e("\t".$f,1,'white');
+                if($this->cfg->show_details)
+                {
+                   $this->e("[".$data['score']."]\t",0,"cyan"); 
+                   $this->e($explain,0);
+                }
+                
+                if($this->cfg->show_details)
+                {
+                    if(strlen($explain) > 15){
+                        $this->e("\t".$f,1,'white');
+                    } else {
+                       $this->e("\t\t".$f,1,'white'); 
+                    }
                 } else {
-                   $this->e("\t\t".$f,1,'white'); 
+                        $this->e($f,1,'white');
                 }
                 /*
                 if($this->cfg->show_details){
