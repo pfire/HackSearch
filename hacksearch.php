@@ -294,6 +294,13 @@ class FileScanner {
     			$this->score += 100;
     			$this->explain[] = "[mass_mailer]";
     		}
+    		if(stripos($this->contents, '="base64_decode";return') !== FALSE
+    		    AND stripos($this->contents, ".= isset(\$") !== FALSE
+    		    AND stripos($this->contents, "strlen") !== FALSE
+    		    ){
+    		        $this->score += 100;
+    		        $this->explain[] = "[php_mailer31]";
+    		    }
     	}
     }
 
@@ -342,10 +349,16 @@ class FileScanner {
       	return false;
       }
       // Search for eval($_POST or eval($_GET) or request/cookie/etc
-      if(preg_match('/\b(eval|system)\b\s*(.*)\(\s*(\$_GET|\$_POST|\$_REQUEST|\$_COOKIE|\$_SERVER)|killall|crontab/i',$l)){
+      if(preg_match('/\beval\b\s*(.*)\(\s*(\$_GET|\$_POST|\$_REQUEST|\$_COOKIE|\$_SERVER)/i',$l)){
          //This is critical.
          $this->score += 100;
          $this->explain[] = "[eval|sys_globals]";
+      }
+      // Search for system followed by killall, crontab, ps or cat whole words only.
+      if(preg_match('/\b(system|exec)\b\s*(.*)\(\s*.*(\bkillall\b|\bcrontab\b|\bps\b|\bcat\b)/ig',$l)){
+         //This is critical.
+         $this->score += 100;
+         $this->explain[] = "[exec|cmd_command]";
       }
    }
 
@@ -423,11 +436,7 @@ class FileScanner {
         	    }
         	}
 
-        	if(stripos($l,'urldecode') !== FALSE){
-        	    $this->score +=25;
-        	}
-            
-            //Long lines are normal for .js, .meta and .json files. We do not penalize them. 
+        	//Long lines are normal for most files but PHP.
             if($this->f->getExtension() == "php"){
 			//Additional checks for keywords in such a long line
                 if(stripos($l,'ini_set') !== FALSE){
@@ -442,7 +451,10 @@ class FileScanner {
 				    $this->score += 50;
 				    $this->explain[] = "[+globals]";
 				}
-            
+				if(stripos($l,'urldecode') !== FALSE){
+        	        $this->score +=25;
+        	        $this->explain[] = "[+urldecode]";
+        	    }
             	if(stripos($l,'mail') !== FALSE){
             	    $this->score +=25;
             	    $this->explain[] = "[+mail]";
