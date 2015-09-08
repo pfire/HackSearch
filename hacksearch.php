@@ -31,6 +31,7 @@ $shortopts .= "q";// Quiet mode. Supress all output until the end of the script,
 
 $longopts  = array(
     "target:",   // Change the directory to be scanned to "target"
+    "appfocus:", // Add an application focus. Available options are Joomla and WordPress
     "help",     // Show the help screen and exit.
     "version",  // Show the version number and exit.
     "license"   // Show the license screen and exit.
@@ -355,7 +356,7 @@ class FileScanner {
          $this->explain[] = "[eval|sys_globals]";
       }
       // Search for system followed by killall, crontab, ps or cat whole words only.
-      if(preg_match('/\b(system|exec)\b\s*(.*)\(\s*.*(\bkillall\b|\bcrontab\b|\bps\b|\bcat\b)/ig',$l)){
+      if(preg_match('/\b(system|exec)\b\s*(.*)\(\s*.*(\bkillall\b|\bcrontab\b|\bps\b|\bcat\b)/i',$l)){
          //This is critical.
          $this->score += 100;
          $this->explain[] = "[exec|cmd_command]";
@@ -474,6 +475,91 @@ class FileScanner {
    }
 }
 
+class AppFocus {
+    
+    public $app_version; //String
+    public $app_hashes; //Array
+    public $app_name; //String
+    public $app_hashes_update_server; //String
+    
+    public function fetch_app_hashes(){
+        $opts = array(
+          'http'=>array(
+            'method'=>"GET",
+            'header'=>"Accept-language: en\r\n" .
+                      "User-agent: HackSearch GitHub Version\r\n"
+          )
+        );
+        $context = stream_context_create($opts);
+        $ret = file_get_contents($this->app_hashes_update_server . $this->app_version . ".txt",FALSE,$context);
+        $this->app_hashes = unserialize($ret);
+        if(is_array($this->app_hashes) AND count($this->app_hashes) > 0){
+            return true;
+        } else {
+            return false;
+        }
+    }
+    public function hash_match($filename,$hash){
+        if(isset($this->app_hashes[$filename]))
+        {
+            if($this->app_hashes[$filename] == $hash){
+                return true;
+            } else {
+                return false;
+            }
+            
+            } else {
+                return true; 
+        }
+    }
+}
+
+class JoomlaFocus extends AppFocus {
+    public $app_version;
+    public $app_hashes = array();
+    public $app_name = "Joomla";
+    public $app_hashes_update_server = "http://www.phpfire.net/hacksearch/joomla/"; //WITH A TRAILING SLASH
+    
+    public function get_version()
+    {
+        $major = 0;
+        $minor = 0;
+        
+        $found = false;
+        if(file_exists('libraries/cms/version/version.php'))
+        {
+            $contents = file('libraries/cms/version/version.php', FILE_IGNORE_NEW_LINES  |FILE_SKIP_EMPTY_LINES);
+              foreach($contents as $line)
+              {
+                  if(stripos($line,'public $RELEASE =') !== FALSE)
+                  {
+                      preg_match('/\d\.\d/',$line,$matches);
+                      if(count($matches) > 0)
+                      {
+                          $major = $matches[0];
+                      }
+                  }
+                  if(stripos($line,'$DEV_LEVEL =') !== FALSE)
+                  {
+                      preg_match('/\d/',$line,$matches);
+                      if(count($matches) > 0)
+                      {
+                          $minor = $matches[0];
+                          $found = true;
+                      }
+                  }
+              }
+        }
+        if($major != 0 AND $found)
+        {
+            $this->app_version = $major . "." . $minor;
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
 
 /* Config Class */
 
@@ -493,6 +579,11 @@ class HackSearch_Config
     public $md5_server = "http://phpfire.net/hacksearch/md5s/index.html";
     public $excludes_server = "http://phpfire.net/hacksearch/falsepositive/index.html";
 	public $hs_version = "2.2.1";
+	
+	public $appfocus;
+	public $app_focused_run = false;
+	public $afo; // App focused object. An instance of the app focus class.
+	
     
     public function __construct()
     {
@@ -528,6 +619,12 @@ class HackSearch_Config
         if(isset($options['s']))
         {
             $this->show_details = false;
+        }
+        
+        if(isset($options['appfocus']) and strlen($options['appfocus']) > 0)
+        {
+            $this->appfocus = $options['appfocus'];
+            $this->app_focused_run = true;
         }
         
         if(isset($options['f']))
@@ -1003,7 +1100,7 @@ function fetch_rules($source_url, $isMD5 = FALSE)
       'http'=>array(
         'method'=>"GET",
         'header'=>"Accept-language: en\r\n" .
-                  "User-agent: SG Colleagues\r\n"
+                  "User-agent: HackSearch GitHub Version\r\n"
       )
     );
     $context = stream_context_create($opts);
@@ -1074,6 +1171,68 @@ function fetch_rules($source_url, $isMD5 = FALSE)
     {
         $output->e(' (Found: '.count($false_positives).')',1,'white');
     }
+    
+    /* Is there any App focus enabled? */
+    if($config->app_focused_run)
+    {
+        if(class_exists(ucfirst(strtolower($config->appfocus))."Focus"))
+        {
+            $class = ucfirst(strtolower($config->appfocus))."Focus";
+            $config->afo = new $class();
+            if(!$config->afo->get_version())
+            {
+                if(!$config->quiet)
+                {
+                    $output->e("[*]",0,'red');
+                    $output->e(' Appfocus: cannot determine application version.',0,'white');
+                }
+                $config->app_focused_run = false;
+            
+                if(!$config->quiet)
+                {
+                    $output->e("[*]",0,'red');
+                    $output->e(' Appfocus: is now disabled.',0,'white');
+                }
+            } else {
+                if(!$config->afo->fetch_app_hashes())
+                {
+                    if(!$config->quiet)
+                    {
+                        $output->e("[*]",0,'red');
+                        $output->e(' Appfocus: cannot download specific version hashes.',0,'white');
+                    }
+                
+                    $config->app_focused_run = false;
+            
+                    if(!$config->quiet)
+                    {                   
+                        $output->e("[*]",0,'red');
+                        $output->e(' Appfocus: is now disabled.',0,'white');
+                    }
+                } else {
+                    if(!$config->quiet)
+                    {
+                        $output->e("[*]",0,'green');
+		                $output->e(' AppFocus enabled..',0,'white');
+                    }
+                }
+            }
+        } else {
+            if(!$config->quiet)
+            {
+                $output->e("[*]",0,'red');
+                $output->e(' Appfocus: passed unknown application parameter.',0,'white');
+            }
+            
+            $config->app_focused_run = false;
+            
+            if(!$config->quiet)
+            {        
+                $output->e("[*]",0,'red');
+                $output->e(' Appfocus: is now disabled.',0,'white');
+            }
+        }
+    }
    
  
     /* Print the start time */
@@ -1099,6 +1258,18 @@ function fetch_rules($source_url, $isMD5 = FALSE)
                    // Matched files will not be opened for reading to save time.
                    // Only scan files bigger than 0 bytes and less than 2MB
 					$fmd5 = md5_file($it->key());
+					
+					// Check if AppFocus has been defined and process the file first.
+					if($config->app_focused_run)
+					{
+					    if(!$config->afo->hash_match($it->key(),$fmd5)){
+					        $hits++;
+					        $infected[$it->getRealPath()] = array('explain' => '[modified_core_file]','score' => 100);
+					        $it->next();
+					        continue;
+					    }
+					}
+					
                     if($it->getSize() > 0 AND $it->getSize() < 2048576 ){ 
 						if(in_array($fmd5, $false_positives))
 						{
