@@ -195,6 +195,12 @@ class FileScanner {
 
     private function global_rule_5()
     {
+            if(stripos($this->contents,'wscandir') !== FALSE AND stripos($this->contents,'filesman') !== FALSE AND stripos($this->contents,'uploadfile') !== FALSE)
+            {
+                $this->score +=100;
+                $this->explain[] = "[File Uploader]";
+                return;
+            }
             if(stripos($this->contents,'PHP_OS') !== FALSE AND !array_key_exists('php_os',$this->reg)){
                 if(!in_array(md5_file($this->f->getRealPath()),
                 array('c3d902f1007e54d1f95b268e4f9643d6','a392bff2e5d22b555bf1e5c098a3eda3','d1c8a277f0cc128b5610db721c70eabd')
@@ -356,7 +362,7 @@ class FileScanner {
          $this->explain[] = "[eval|sys_globals]";
       }
       // Search for system followed by killall, crontab, ps or cat whole words only.
-      if(preg_match('/\b(system|exec)\b\s*(.*)\(\s*.*(\bkillall\b|\bcrontab\b|\bps\b|\bcat\b)/i',$l)){
+      if(preg_match('/\b(system|exec)\b\s*(.*)\(\s*.*(\bkillall\b|\bcrontab\b|\bcat\b)/i',$l)){
          //This is critical.
          $this->score += 100;
          $this->explain[] = "[exec|cmd_command]";
