@@ -12,4 +12,31 @@ HackSearch is a malware search tool written in PHP. Its mainly focused on detect
 ### Common Usage
 
 The most common way to run the program is by downloading it and passing it to the PHP CLI. The following command will do just that in your current directory:
-`curl -sS https://raw.githubusercontent.com/pfire/HackSearch/master/hacksearch.php | php-cli`
+
+```
+curl -sS https://raw.githubusercontent.com/pfire/HackSearch/master/hacksearch.php | php-cli
+```
+Depending on your setup, you might want to change *php-cli* to just *php*. The above command will run the HackSearch script with its default settings. HackSearch supports wide variety of command line options. For a full list of them, please use the --help option. Some of them are listed below.
+
+### How to change the scan target directory
+
+In order to scan a folder different from your current working directory, use the *--target* option:
+
+```
+php hacksearch.php --target=/home/hacksearch/public_html
+```
+
+### Pipeing the output to a different software
+
+If you would like to pipe the output to a different software/command, you would most probably want to supress the output. You can do so by using '-s' and '-q' options:
+
+```
+php hacksearch.php -q -s
+```
+
+### Joomla and WordPress specific features
+
+If you are using Joomla 3.0+ or WordPress 4.0+, you can enable application focus by passing 'appfocus=Joomla' or 'appfocus=WordPress'. The feature checks the md5sum of all default core files of the application and marks those that are modified.
+
+
+
