@@ -188,8 +188,10 @@ class FileScanner {
     {
     	if(stripos($this->contents,'hacked by') !== FALSE){
     	    //Pretty much bad.. :)
-    	    $this->score += 100;
-    	    $this->explain[] = "[hacked_by_str]";
+    	    if($this->f->getFilename() != "class.smtp.php"){
+    	        $this->score += 100;
+    	        $this->explain[] = "[hacked_by_str]";
+    	    }
     	}
     }
 
