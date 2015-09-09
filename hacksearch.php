@@ -520,6 +520,43 @@ class AppFocus {
     }
 }
 
+class WordpressFocus extends AppFocus {
+    
+    public $app_version;
+    public $app_hashes = array();
+    public $app_name = "WordPress";
+    public $app_hashes_update_server = "http://www.phpfire.net/hacksearch/wordpress/"; //WITH A TRAILING SLASH
+    
+    public function get_version()
+    {
+        $version = "0.0";
+        if(file_exists('wp-includes/version.php'))
+        {
+            $contents = file('wp-includes/version.php', FILE_IGNORE_NEW_LINES  |FILE_SKIP_EMPTY_LINES);
+              foreach($contents as $line)
+              {
+                  if(stripos($line,'$wp_version =') !== FALSE)
+                  {
+                      preg_match('/\d\.\d+(\.\d)?/i',$line,$matches);
+                      if(count($matches) > 0)
+                      {
+                          $version = $matches[0];
+                      }
+                  }
+              }
+        }
+        
+        if($version == "0.0")
+        {
+            return false;
+        } else {
+            $this->app_version = $version;
+            return true;
+        }
+    }
+    
+}
+
 class JoomlaFocus extends AppFocus {
     public $app_version;
     public $app_hashes = array();
@@ -1197,7 +1234,7 @@ function fetch_rules($source_url, $isMD5 = FALSE)
                 if(!$config->quiet)
                 {
                     $output->e("[*]",0,'red');
-                    $output->e(' Appfocus: is now disabled.',0,'white');
+                    $output->e(' Appfocus: is now disabled.',1,'white');
                 }
             } else {
                 if(!$config->afo->fetch_app_hashes())
@@ -1213,13 +1250,13 @@ function fetch_rules($source_url, $isMD5 = FALSE)
                     if(!$config->quiet)
                     {                   
                         $output->e("[*]",0,'red');
-                        $output->e(' Appfocus: is now disabled.',0,'white');
+                        $output->e(' Appfocus: is now disabled.',1,'white');
                     }
                 } else {
                     if(!$config->quiet)
                     {
                         $output->e("[*]",0,'green');
-		                $output->e(' AppFocus enabled..',0,'white');
+		                $output->e(' AppFocus enabled. '.$config->afo->app_name." version ".$config->afo->app_version,1,'white');
                     }
                 }
             }
