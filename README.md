@@ -1,8 +1,8 @@
 # HackSearch
 
-## v2.2.1 
+## v2.3.0 
 
-HackSearch is a malware search tool written in PHP. Its mainly focused on detecting compromised/hacked files in PHP web based applications, such as Joomla, WordPress, Magento, etc.
+HackSearch is a malware search tool written in PHP. It is mainly focused on detecting compromised/hacked files in PHP web based applications, such as Joomla, WordPress, Magento, etc.
 
 ### Requirements
 * PHP v 5.3.10+
@@ -36,7 +36,13 @@ php hacksearch.php -q -s
 
 ### Joomla and WordPress specific features
 
-If you are using Joomla 3.0+ or WordPress 4.0+, you can enable application focus by passing 'appfocus=Joomla' or 'appfocus=WordPress'. The feature checks the md5sum of all default core files of the application and marks those that are modified.
+If you are using Joomla 3.0+ or WordPress 2.0+, you can enable application focus by passing 'appfocus=Joomla' or 'appfocus=WordPress'. The feature checks the md5sum of all default core files of the application and marks those that are modified.
+
+### Change Log
+
+Version 2.3.0 - Updated core code and include application search feature
+
+Version 2.2.1 -- Added Joomla/Wordpress appfocus feature
 
 
 

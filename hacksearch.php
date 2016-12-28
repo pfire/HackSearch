@@ -8,14 +8,14 @@
  * @category   HackSearch
  * @package    HackSearch CLI
  * @author     Valeri Markov <val@phpfire.net>
- * @copyright  2012-2014 Valeri Markov
+ * @copyright  2012-2017 Valeri Markov
  * @license    LGPLv3
- * @version    2.2.1
+ * @version    2.3.0
  * @link       http://www.phpfire.net/hacksearch.phar
  * @since      File available since Release 2.0.0
  */
  
-define("HS_VERSION","2.2.1");
+define("HS_VERSION","2.3.0");
 
 /* Setup some php variables */
 set_time_limit(0);
@@ -32,6 +32,7 @@ $shortopts .= "q";// Quiet mode. Supress all output until the end of the script,
 $longopts  = array(
     "target:",   // Change the directory to be scanned to "target"
     "appfocus:", // Add an application focus. Available options are Joomla and WordPress
+    "no-malware-scan", // Disable the malware scan feature
     "help",     // Show the help screen and exit.
     "version",  // Show the version number and exit.
     "license"   // Show the license screen and exit.
@@ -61,8 +62,9 @@ class FileScanner {
        * Avi, MDF, MOV, MPG and MPEG movie type of files
        * PSD Photoshop files
        * Zip, Tar, gz, 7zip, Rar archive files
+       * Mo language files
        */
-      $excludes = array('pdf','doc','docx','avi','mdf','mov','mpg','mpeg','psd','zip','tar','gz','7zip','rar');
+      $excludes = array('pdf','doc','docx','avi','mdf','mov','mpg','mpeg','psd','zip','tar','gz','7zip','rar','mo');
       if(in_array($f->getExtension(),$excludes))
       {
       	return false;
@@ -417,9 +419,11 @@ class FileScanner {
    	
    		if(stripos($l,"stream_context_create") !== FALSE AND stripos($l,"stream_socket_client") !== FALSE AND stripos($l,"base64_decode") !== FALSE)
    		{
-   			$this->score +=100;
-   			$this->explain[] = "[socket+base64]";
+   			if($this->f->getExtension() == "php"){
+   			    $this->score +=100;
+   			    $this->explain[] = "[socket+base64]";
    			return;
+   			}
    		}
    		//TODO: change this to regex to check whole words only.
    		if(stripos($l, "porn") !== FALSE AND stripos($l, "sex") !== FALSE)
@@ -507,6 +511,7 @@ class AppFocus {
             return false;
         }
     }
+    
     public function hash_match($filename,$hash){
         if(isset($this->app_hashes[$filename]))
         {
@@ -515,10 +520,8 @@ class AppFocus {
             } else {
                 return false;
             }
-            
-            } else {
-                return true; 
         }
+        return false; // Not found in the hash database
     }
 }
 
@@ -605,6 +608,364 @@ class JoomlaFocus extends AppFocus {
     }
 }
 
+class HackSearch_Version_Result 
+{
+    public $appName;
+    public $appVersion;
+    public $location;
+    
+    public function __construct($appName,$appVersion,$location)
+    {
+        $this->appName = $appName;
+        $this->appVersion = $appVersion;
+        $this->location = $location;
+    }
+}
+
+class HackSearch_Versions 
+{
+    
+    private $app_files = array(
+        'WordPress' => '/wp-includes/version.php',
+        'Joomla' => '/libraries/cms/version/version.php',
+        'Magento1' => '/app/Mage.php',
+        'Magento2' => '/vendor/magento/magento2-base/composer.json',
+        'Drupal8' => '/core/modules/dblog/dblog.info.yml',
+        'Drupal6or7' => '/modules/dblog/dblog.info',
+        'phpBB' => '/includes/constants.php',
+        'Gallery2' => '/modules/core/module.inc',
+        'Gallery3' => '/modules/gallery/helpers/gallery.php',
+        'MediaWiki' => '/includes/DefaultSettings.php',
+        'OpenCart' => '/admin/index.php',
+        'PrestaShop' => '/config/settings.inc.php',
+        'PrestaShop17' => '/config/autoload.php',
+        'osCommerce' => '/admin/includes/application_top.php'
+    );
+    
+    public $results = array();
+
+    public function is_version_file($path)
+    {
+        foreach($this->app_files as $k=>$v)
+        {
+            if($this->endswith($path, $v))
+            {
+                return $k;
+            }
+        }
+        //If none of the files match..
+        return "";
+    }
+    
+    public function check_app_version($filename)
+    {
+        $app_name = $this->is_version_file($filename);
+        if($app_name == "")
+        {
+            //Something went wrong. This is not the version file we are looking for...
+            return false;
+        }
+        
+        //Determine the version of the application now.
+        $method = 'check_'.$app_name.'_version';
+        if(!method_exists($this, $method))
+        {
+            //There is no method for this app.
+            return false;
+        }
+        
+        return $this->$method($filename);
+        
+    }
+    
+    private function check_WordPress_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, 'wp_version = ') !== false)
+            {
+                preg_match('/\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['WordPress'],$filename);
+            $this->results[] = new HackSearch_Version_Result('WordPress',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_PrestaShop_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "define('_PS_VERSION_', '") !== false)
+            {
+                preg_match('/\d+\.\d*\.*\d*\.*\d*/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['PrestaShop'],$filename);
+            $this->results[] = new HackSearch_Version_Result('PrestaShop',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_PrestaShop17_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "define('_PS_VERSION_', '") !== false)
+            {
+                preg_match('/\d+\.\d*\.*\d*\.*\d*/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['PrestaShop17'],$filename);
+            $this->results[] = new HackSearch_Version_Result('PrestaShop-1.7.x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    
+    private function check_OpenCart_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "define('VERSION', '") !== false)
+            {
+                preg_match('/\d+\.\d*\.*\d*\.*\d*/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['OpenCart'],$filename);
+            $this->results[] = new HackSearch_Version_Result('OpenCart',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_Drupal8_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, 'version: ') !== false)
+            {
+                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['Drupal8'],$filename);
+            $this->results[] = new HackSearch_Version_Result('Drupal-8.x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_Drupal6or7_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, 'version: ') !== false)
+            {
+                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['Drupal6or7'],$filename);
+            $this->results[] = new HackSearch_Version_Result('Drupal-6.x/7.x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_osCommerce_version($filename)
+    {
+        //We left the detection filename to be the application_top, so we can filter most apps.
+        //The actual version of the app however can be found in includes/version.php file.
+        $path_parts = @explode($this->app_files['osCommerce'],$filename);
+        $matches = array();
+        if(file_exists($path_parts[0]. "/includes/version.php"))
+        {
+            $matches[] = file_get_contents($path_parts[0]. "/includes/version.php");
+        } else {
+            //We fall back to the original application top check.
+            $f=file($filename, FILE_SKIP_EMPTY_LINES);
+            foreach($f as $line)
+            {
+                if(stripos($line, "define('PROJECT_VERSION'") !== false)
+                {
+                    preg_match('/\d+\.*\d*\.*\d*/',$line,$matches);
+                }
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $this->results[] = new HackSearch_Version_Result('Drupal-6.x/7.x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_phpBB_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "define('PHPBB_VERSION', '") !== false)
+            {
+                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['phpBB'],$filename);
+            $this->results[] = new HackSearch_Version_Result('phpBB-3x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_Gallery2_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "this->setGalleryVersion(") !== false)
+            {
+                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['Gallery2'],$filename);
+            $this->results[] = new HackSearch_Version_Result('Gallery-2x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_Gallery3_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "const VERSION =") !== false)
+            {
+                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['Gallery3'],$filename);
+            $this->results[] = new HackSearch_Version_Result('Gallery-3x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_MediaWiki_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "wgVersion = '") !== false)
+            {
+                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['MediaWiki'],$filename);
+            $this->results[] = new HackSearch_Version_Result('MediaWiki',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_Magento2_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, '"version": "') !== false)
+            {
+                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['Magento2'],$filename);
+            $this->results[] = new HackSearch_Version_Result('Magento 2.x',$matches[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_Magento1_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $major = array();
+        $minor = array();
+        $revision = array();
+        foreach($f as $line)
+        {
+            if(stripos($line, "'major'     => '1") !== false)
+            {
+                $major[] = "1";
+            }
+            if(stripos($line, "'minor'     => '") !== false)
+            {
+                preg_match('/\d+/',$line,$minor);
+            }
+            if(stripos($line, "'revision'     => '") !== false)
+            {
+                preg_match('/\d+/',$line,$revision);
+            }
+        }
+        if(isset($matches[0]) AND strlen($matches[0]) > 0)
+        {
+            $path_parts = @explode($this->app_files['Magento2'],$filename);
+            $this->results[] = new HackSearch_Version_Result('Magento 2.x',$major[0] . ".".$minor[0].".".$revision[0],$path_parts[0]);
+        }
+    }
+    
+    private function check_Joomla_version($filename)
+    {
+        $f=file($filename, FILE_SKIP_EMPTY_LINES);
+        $matches_major = array();
+        $matches_minor = array();
+        foreach($f as $line)
+        {
+            //Get the Major version (2+ digits)
+            if(stripos($line, 'const RELEASE =') !== false)
+            {
+                preg_match('/\d+\.\d+/',$line,$matches_major);
+            }
+            //Get the minor version (1+ digit)
+            if(stripos($line, 'const DEV_LEVEL =') !== false)
+            {
+                preg_match('/\d+/',$line,$matches_minor);
+            }
+        }
+        if(isset($matches_major[0]) AND isset($matches_minor[0]))
+        {
+            $path_parts = @explode($this->app_files['Joomla'],$filename);
+            $this->results[] = new HackSearch_Version_Result('Joomla',$matches[0],$path_parts[0]);
+        }
+        
+    }
+    
+    public function endswith($string, $test) {
+        $strlen = strlen($string);
+        $testlen = strlen($test);
+        if ($testlen > $strlen) return false;
+        return substr_compare($string, $test, $strlen - $testlen, $testlen) === 0;
+    }
+    
+    
+}
 
 /* Config Class */
 
@@ -612,6 +973,8 @@ class HackSearch_Config
 {
     public $caller_dir = "./";
     public $target_dir = "./";
+    
+    public $do_malware_scan = true; // By default, we should scan files for malware
     
     public $quiet = false;
     public $buffered = false;
@@ -623,7 +986,7 @@ class HackSearch_Config
     public $update_server = "http://phpfire.net/hacksearch/definitions.php";
     public $md5_server = "http://phpfire.net/hacksearch/md5s/index.html";
     public $excludes_server = "http://phpfire.net/hacksearch/falsepositive/index.html";
-	public $hs_version = "2.2.1";
+	public $hs_version = "2.3.0";
 	
 	public $appfocus;
 	public $app_focused_run = false;
@@ -640,6 +1003,11 @@ class HackSearch_Config
             $this->target_dir = $options['target'];
         } else {
             $this->target_dir = $this->caller_dir;
+        }
+        
+        if(isset($options['no-malware-scan']))
+        {
+            $this->do_malware_scan = false;
         }
         
         if(!@chdir($this->target_dir))
@@ -796,11 +1164,11 @@ class HackSearch_Output
         if(!$this->cfg->quiet)
         {
             $this->e('##############################################',1,'cyan');
-            $this->e('## PHP Hack Search v2.2.1                   ##',1,'cyan');
+            $this->e('## PHP Hack Search v2.3.0                   ##',1,'cyan');
             $this->e('## Author: Valeri Markov                    ##',1,'cyan');
             $this->e('## URL: http://www.phpfire.net/             ##',1,'cyan');
-            $this->e('## License: LGPL v3, see --license          ##',1,'cyan');
-            $this->e('## (C) Copyright 2012-2015 Valeri Markov    ##',1,'cyan');
+            $this->e('## License: MIT LICENSE, see --license      ##',1,'cyan');
+            $this->e('## (C) Copyright 2012-2017 Valeri Markov    ##',1,'cyan');
             $this->e('##############################################',1,'cyan');
         }
     }
@@ -946,6 +1314,9 @@ class HackSearch_Output
         $this->e("  --target \t\t\t",0,'cyan');
         $this->e("Set the folder to scan. By default it is the current working directory.",1,'white');
         
+        $this->e("  --appfocus \t\t\t",0,'cyan');
+        $this->e("Set the application focus. Available options are WordPress and Joomla.",1,'white');
+        
         $this->e("  --help \t\t\t",0,'cyan');
         $this->e("Show this screen.",1,'white');
         
@@ -967,171 +1338,27 @@ class HackSearch_Output
         $this->e("");
         $this->e("License",1,'white');
         $license = <<<EOT
-GNU LESSER GENERAL PUBLIC LICENSE
-                       Version 3, 29 June 2007
+MIT License
 
- Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>
- Everyone is permitted to copy and distribute verbatim copies
- of this license document, but changing it is not allowed.
+Copyright (c) 2017 Valeri Markov http://www.phpfire.net/
 
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-  This version of the GNU Lesser General Public License incorporates
-the terms and conditions of version 3 of the GNU General Public
-License, supplemented by the additional permissions listed below.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-  0. Additional Definitions.
-
-  As used herein, "this License" refers to version 3 of the GNU Lesser
-General Public License, and the "GNU GPL" refers to version 3 of the GNU
-General Public License.
-
-  "The Library" refers to a covered work governed by this License,
-other than an Application or a Combined Work as defined below.
-
-  An "Application" is any work that makes use of an interface provided
-by the Library, but which is not otherwise based on the Library.
-Defining a subclass of a class defined by the Library is deemed a mode
-of using an interface provided by the Library.
-
-  A "Combined Work" is a work produced by combining or linking an
-Application with the Library.  The particular version of the Library
-with which the Combined Work was made is also called the "Linked
-Version".
-
-  The "Minimal Corresponding Source" for a Combined Work means the
-Corresponding Source for the Combined Work, excluding any source code
-for portions of the Combined Work that, considered in isolation, are
-based on the Application, and not on the Linked Version.
-
-  The "Corresponding Application Code" for a Combined Work means the
-object code and/or source code for the Application, including any data
-and utility programs needed for reproducing the Combined Work from the
-Application, but excluding the System Libraries of the Combined Work.
-
-  1. Exception to Section 3 of the GNU GPL.
-
-  You may convey a covered work under sections 3 and 4 of this License
-without being bound by section 3 of the GNU GPL.
-
-  2. Conveying Modified Versions.
-
-  If you modify a copy of the Library, and, in your modifications, a
-facility refers to a function or data to be supplied by an Application
-that uses the facility (other than as an argument passed when the
-facility is invoked), then you may convey a copy of the modified
-version:
-
-   a) under this License, provided that you make a good faith effort to
-   ensure that, in the event an Application does not supply the
-   function or data, the facility still operates, and performs
-   whatever part of its purpose remains meaningful, or
-
-   b) under the GNU GPL, with none of the additional permissions of
-   this License applicable to that copy.
-
-  3. Object Code Incorporating Material from Library Header Files.
-
-  The object code form of an Application may incorporate material from
-a header file that is part of the Library.  You may convey such object
-code under terms of your choice, provided that, if the incorporated
-material is not limited to numerical parameters, data structure
-layouts and accessors, or small macros, inline functions and templates
-(ten or fewer lines in length), you do both of the following:
-
-   a) Give prominent notice with each copy of the object code that the
-   Library is used in it and that the Library and its use are
-   covered by this License.
-
-   b) Accompany the object code with a copy of the GNU GPL and this license
-   document.
-
-  4. Combined Works.
-
-  You may convey a Combined Work under terms of your choice that,
-taken together, effectively do not restrict modification of the
-portions of the Library contained in the Combined Work and reverse
-engineering for debugging such modifications, if you also do each of
-the following:
-
-   a) Give prominent notice with each copy of the Combined Work that
-   the Library is used in it and that the Library and its use are
-   covered by this License.
-
-   b) Accompany the Combined Work with a copy of the GNU GPL and this license
-   document.
-
-   c) For a Combined Work that displays copyright notices during
-   execution, include the copyright notice for the Library among
-   these notices, as well as a reference directing the user to the
-   copies of the GNU GPL and this license document.
-
-   d) Do one of the following:
-
-       0) Convey the Minimal Corresponding Source under the terms of this
-       License, and the Corresponding Application Code in a form
-       suitable for, and under terms that permit, the user to
-       recombine or relink the Application with a modified version of
-       the Linked Version to produce a modified Combined Work, in the
-       manner specified by section 6 of the GNU GPL for conveying
-       Corresponding Source.
-
-       1) Use a suitable shared library mechanism for linking with the
-       Library.  A suitable mechanism is one that (a) uses at run time
-       a copy of the Library already present on the user's computer
-       system, and (b) will operate properly with a modified version
-       of the Library that is interface-compatible with the Linked
-       Version.
-
-   e) Provide Installation Information, but only if you would otherwise
-   be required to provide such information under section 6 of the
-   GNU GPL, and only to the extent that such information is
-   necessary to install and execute a modified version of the
-   Combined Work produced by recombining or relinking the
-   Application with a modified version of the Linked Version. (If
-   you use option 4d0, the Installation Information must accompany
-   the Minimal Corresponding Source and Corresponding Application
-   Code. If you use option 4d1, you must provide the Installation
-   Information in the manner specified by section 6 of the GNU GPL
-   for conveying Corresponding Source.)
-
-  5. Combined Libraries.
-
-  You may place library facilities that are a work based on the
-Library side by side in a single library together with other library
-facilities that are not Applications and are not covered by this
-License, and convey such a combined library under terms of your
-choice, if you do both of the following:
-
-   a) Accompany the combined library with a copy of the same work based
-   on the Library, uncombined with any other library facilities,
-   conveyed under the terms of this License.
-
-   b) Give prominent notice with the combined library that part of it
-   is a work based on the Library, and explaining where to find the
-   accompanying uncombined form of the same work.
-
-  6. Revised Versions of the GNU Lesser General Public License.
-
-  The Free Software Foundation may publish revised and/or new versions
-of the GNU Lesser General Public License from time to time. Such new
-versions will be similar in spirit to the present version, but may
-differ in detail to address new problems or concerns.
-
-  Each version is given a distinguishing version number. If the
-Library as you received it specifies that a certain numbered version
-of the GNU Lesser General Public License "or any later version"
-applies to it, you have the option of following the terms and
-conditions either of that published version or of any later version
-published by the Free Software Foundation. If the Library as you
-received it does not specify a version number of the GNU Lesser
-General Public License, you may choose any version of the GNU Lesser
-General Public License ever published by the Free Software Foundation.
-
-  If the Library as you received it specifies that a proxy can decide
-whether future versions of the GNU Lesser General Public License shall
-apply, that proxy's public statement of acceptance of any version is
-permanent authorization for you to choose that version for the
-Library.      
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 EOT;
     $this->e($license);
         
@@ -1150,12 +1377,7 @@ function fetch_rules($source_url, $isMD5 = FALSE)
     );
     $context = stream_context_create($opts);
     $ret = file_get_contents($source_url,FALSE,$context);
-    if($isMD5){
-         return @unserialize($ret);
-    } else {
-         //TODO: perhaps we should think of a safer way to execute the malware updates?!
-         eval($ret);
-    }
+    return @unserialize($ret);
 }
 
 /***********************************************************************************/
@@ -1166,6 +1388,7 @@ function fetch_rules($source_url, $isMD5 = FALSE)
     $config = new HackSearch_Config();
     $colors = new HackSearch_Colors($config);
     $output = new HackSearch_Output($config,$colors);
+    $appversions = new HackSearch_Versions();
     
     if(isset($options['help']))
     {
@@ -1304,6 +1527,12 @@ function fetch_rules($source_url, $isMD5 = FALSE)
                    // Only scan files bigger than 0 bytes and less than 2MB
 					$fmd5 = md5_file($it->key());
 					
+					//Check if this is a version file.
+					if(strlen($appversions->is_version_file($it->getRealPath())) > 0)
+					{
+					    $appversions->check_app_version($it->getRealPath());
+					}
+					
 					// Check if AppFocus has been defined and process the file first.
 					if($config->app_focused_run)
 					{
@@ -1315,7 +1544,7 @@ function fetch_rules($source_url, $isMD5 = FALSE)
 					    }
 					}
 					
-                    if($it->getSize() > 0 AND $it->getSize() < 2048576 ){ 
+                    if($config->do_malware_scan AND $it->getSize() > 0 AND $it->getSize() < 2048576 ){ 
 						if(in_array($fmd5, $false_positives))
 						{
 							$it->next();
@@ -1356,5 +1585,7 @@ function fetch_rules($source_url, $isMD5 = FALSE)
     $config->complete_time = time();
     $output->set_results($scanned,$hits,$infected);
    
+   
+    var_dump($appversions->results);
     //Send success signal..
     exit(0);
