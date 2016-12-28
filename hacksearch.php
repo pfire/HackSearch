@@ -9,7 +9,7 @@
  * @package    HackSearch CLI
  * @author     Valeri Markov <val@phpfire.net>
  * @copyright  2012-2017 Valeri Markov
- * @license    LGPLv3
+ * @license    MIT
  * @version    2.3.0
  * @link       http://www.phpfire.net/hacksearch.phar
  * @since      File available since Release 2.0.0
