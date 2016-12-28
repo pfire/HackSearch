@@ -759,7 +759,7 @@ class HackSearch_Versions
         {
             if(stripos($line, 'version: ') !== false)
             {
-                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+                preg_match('/\d+\.\d*\.*\d*/',$line,$matches);
             }
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
@@ -777,7 +777,7 @@ class HackSearch_Versions
         {
             if(stripos($line, 'version: ') !== false)
             {
-                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+                preg_match('/\d+\.\d*\.*\d*/',$line,$matches);
             }
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
@@ -809,7 +809,7 @@ class HackSearch_Versions
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
         {
-            $this->results[] = new HackSearch_Version_Result('Drupal-6.x/7.x',$matches[0],$path_parts[0]);
+            $this->results[] = new HackSearch_Version_Result('OsCommerce',$matches[0],$path_parts[0]);
         }
     }
     
@@ -821,7 +821,7 @@ class HackSearch_Versions
         {
             if(stripos($line, "define('PHPBB_VERSION', '") !== false)
             {
-                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+                preg_match('/\d+\.\d*\.*\d*/',$line,$matches);
             }
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
@@ -839,7 +839,7 @@ class HackSearch_Versions
         {
             if(stripos($line, "this->setGalleryVersion(") !== false)
             {
-                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+                preg_match('/\d+\.\d*\.*\d*/',$line,$matches);
             }
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
@@ -857,7 +857,7 @@ class HackSearch_Versions
         {
             if(stripos($line, "const VERSION =") !== false)
             {
-                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+                preg_match('/\d+\.\d*\.*\d*/',$line,$matches);
             }
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
@@ -875,7 +875,7 @@ class HackSearch_Versions
         {
             if(stripos($line, "wgVersion = '") !== false)
             {
-                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+                preg_match('/\d+\.\d*\.*\d*/',$line,$matches);
             }
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
@@ -893,7 +893,7 @@ class HackSearch_Versions
         {
             if(stripos($line, '"version": "') !== false)
             {
-                preg_match('/\d+\.\d+\.\d+/',$line,$matches);
+                preg_match('/\d+\.\d*\.*\d*/',$line,$matches);
             }
         }
         if(isset($matches[0]) AND strlen($matches[0]) > 0)
@@ -952,7 +952,7 @@ class HackSearch_Versions
         if(isset($matches_major[0]) AND isset($matches_minor[0]))
         {
             $path_parts = @explode($this->app_files['Joomla'],$filename);
-            $this->results[] = new HackSearch_Version_Result('Joomla',$matches[0],$path_parts[0]);
+            $this->results[] = new HackSearch_Version_Result('Joomla',$matches_major[0] . "." .$matches_minor[0],$path_parts[0]);
         }
         
     }
@@ -1173,22 +1173,22 @@ class HackSearch_Output
         }
     }
     
-    public function set_results($scanned,$hits,$infected)
+    public function set_results($scanned,$hits,$infected,$appversions = NULL)
     {
         switch($this->cfg->output)
         {
             case "standard":
-                $this->standard_results($scanned,$hits,$infected);
+                $this->standard_results($scanned,$hits,$infected,$appversions);
                 break;
             case "file":
-                $this->to_file($scanned,$hits,$infected);
+                $this->to_file($scanned,$hits,$infected,$appversions);
                 break;
             default:
-                $this->standard_results($scanned,$hits,$infected);
+                $this->standard_results($scanned,$hits,$infected,$appversions);
         }
     }
     
-    public function standard_results($scanned,$hits,$infected)
+    public function standard_results($scanned,$hits,$infected,$appversions=null)
     {
         if(!$this->cfg->quiet)
         {
@@ -1198,7 +1198,8 @@ class HackSearch_Output
             $this->e('Results:',1,'white');   
         }
         
-        $this->format_infected($infected);
+        $this->format_infected($infected,$appversions);
+        
     }
     
     public function to_file($scanned,$hits,$infected)
@@ -1213,7 +1214,7 @@ class HackSearch_Output
         
     }
     
-    public function format_infected($infected)
+    public function format_infected($infected,$appversions)
     {
         //As txt format
         if($this->cfg->output_format == "txt")
@@ -1250,6 +1251,21 @@ class HackSearch_Output
                 }
                 */
             }
+            
+            if($appversions != null)
+            {
+                $this->e("");
+                $this->e("Applications found:",1,'white');
+                $this->e("");
+                
+                foreach($appversions->results as $result)
+                {
+                   $this->e($result->appName,0,"white");
+                   $this->e("\t".$result->appVersion,0,'cyan');
+                   $this->e("\t".$result->location,1,'green');
+                }
+                
+            } 
             return;
         }
         
@@ -1280,6 +1296,7 @@ class HackSearch_Output
         if($this->cfg->output_format == "json")
         {
             $this->e(json_encode($infected));
+            $this->e(json_encode($appversions->results));
             return;
         }
         
@@ -1287,6 +1304,7 @@ class HackSearch_Output
         if($this->cfg->output_format == "serialize")
         {
             $this->e(serialize($infected));
+            $this->e(serialize($appversions->results));
             return;
         }
     }
@@ -1299,7 +1317,7 @@ class HackSearch_Output
         $this->e("");
         
         $this->e("  -o <file> \t\t",0,'cyan');
-        $this->e("Redirect the output to <file>.",1,'white');
+        $this->e("Redirect the output to a <file>.",1,'white');
         
         $this->e("  -s \t\t\t",0,'cyan');
         $this->e("Enable short mode. Does not print details on why the file is being detected as malicious.",1,'white');
@@ -1583,9 +1601,7 @@ function fetch_rules($source_url, $isMD5 = FALSE)
     }
     
     $config->complete_time = time();
-    $output->set_results($scanned,$hits,$infected);
-   
-   
-    var_dump($appversions->results);
+    $output->set_results($scanned,$hits,$infected,$appversions);
+
     //Send success signal..
     exit(0);
